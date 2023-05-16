@@ -1,0 +1,102 @@
+name: Elixir CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+env:
+  MIX_ENV: test
+  OTP_VERSION_SPEC: "25.2"
+  ELIXIR_VERSION_SPEC: "1.14.4"
+
+jobs:
+  test:
+
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:12-alpine
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+
+    - name: Build Cache
+      uses: actions/cache/restore@v3
+      id: build-cache
+      with:
+        path: _build
+        key: build-${{ runner.os }}
+
+    - name: Deps Cache
+      uses: actions/cache/restore@v3
+      id: deps-cache
+      with:
+        path: deps
+        key: deps-${{ runner.os }}
+
+    - name: Setup Variables
+      id: vars
+      run: |
+        ORGANIZATION=$(echo "${{ github.repository }}" | tr "/" " " | awk '{print $1}')
+        REPOSITORY=$(echo "${{ github.repository }}" | tr "/" " " | awk '{print $2}')
+        echo "ORGANIZATION=$ORGANIZATION" >> $GITHUB_OUTPUT
+        echo "REPOSITORY=$REPOSITORY" >> $GITHUB_OUTPUT
+
+    - name: Vars
+      run: |
+        echo "${{ secrets.GITHUB_TOKEN }}"
+        echo "${{ github.head_ref }}"
+        echo "${{ steps.vars.outputs.REPOSITORY }}"
+        echo "${{ steps.vars.outputs.ORGANIZATION }}"
+
+    - name: Elixir
+      uses: erlef/setup-beam@v1.11
+      id: setup
+      with:
+        otp-version: ${{ env.OTP_VERSION_SPEC }}
+        elixir-version: ${{ env.ELIXIR_VERSION_SPEC }}
+      env:
+        ImageOS: ubuntu20
+
+    - name: Install Mix Dependencies
+      run: mix deps.get
+    
+    - name: Compile
+      run: mix compile
+
+    - name: Run Tests
+      continue-on-error: true
+      run: |
+        mix coverage_reporter \
+          --github-token ${{ secrets.GITHUB_TOKEN }} \
+          --base-branch ${{ github.base_ref }} \
+          --head-branch ${{ github.head_ref }} \
+          --repository ${{ steps.vars.outputs.REPOSITORY }} \
+          --organization ${{ steps.vars.outputs.ORGANIZATION }} \
+
+    - name: Save Deps Cache
+      id: deps-cache-save
+      uses: actions/cache/save@v3
+      with:
+        path: deps
+        key: deps-${{ runner.os }}
+
+    - name: Save Build Cache
+      id: build-cache-save
+      uses: actions/cache/save@v3
+      with:
+        path: _build
+        key: build-${{ runner.os }}
